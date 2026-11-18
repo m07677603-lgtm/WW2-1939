@@ -1,0 +1,691 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>جنگ جهانی ۱۹۳۹</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101722;color:#fff;font-family:Tahoma,Arial;overflow:hidden}
+header{height:48px;background:#17263a;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid #53647b}
+header strong{color:#f1ca7b;font-size:15px}
+#turn{font-size:11px;color:#c8d5e4}
+#map{height:calc(100dvh - 174px);width:100%;background:#a9c1ca}
+#topbar{height:36px;background:#1c2d42;display:flex;align-items:center;justify-content:space-around;font-size:11px}
+#toolbar{height:90px;background:#17263a;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px}
+button{border:0;border-radius:8px;background:#344d69;color:white;font-family:Tahoma;font-weight:bold;font-size:12px;cursor:pointer}
+button:active{filter:brightness(1.35)}
+button.active{background:#d6a94e;color:#17202b}
+button:disabled{opacity:.4}
+.action{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.action span{font-size:20px}
+#message{height:25px;background:#0e1927;color:#e9c77f;text-align:center;font-size:11px;padding:6px}
+#selection{position:absolute;top:90px;right:10px;z-index:500;background:#17263aeb;border:1px solid #71839b;border-radius:8px;padding:9px;font-size:11px;pointer-events:none;max-width:190px;line-height:1.9}
+#modal{position:fixed;inset:0;background:#07111deF;z-index:3000;display:flex;align-items:center;justify-content:center;padding:15px}
+.dialog{background:#1b2d43;border:1px solid #b78c48;border-radius:13px;padding:17px;width:min(430px,100%);max-height:90vh;overflow:auto}
+.dialog h2{text-align:center;color:#f1ca7b;font-size:19px}
+.dialog p{font-size:12px;line-height:2}
+#countrylist{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin:12px 0}
+.countrychoice{padding:11px 4px}
+.primary{width:100%;padding:13px;background:#c49a4c;color:#17202b}
+.hidden{display:none!important}
+.unit-marker{width:30px;height:30px;border-radius:50%;border:2px solid white;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:bold;box-shadow:0 1px 6px #000}
+.unit-marker.selected{outline:3px solid #ffe38a;outline-offset:2px}
+.leaflet-tooltip{font-family:Tahoma;font-size:11px}
+.leaflet-popup-content-wrapper{background:#172b40;color:white}
+.leaflet-popup-tip{background:#172b40}
+.leaflet-control-attribution{font-size:8px!important}
+#help{position:absolute;left:9px;top:90px;z-index:500}
+#help button{padding:9px;background:#263d57}
+@media(max-height:650px){
+ #map{height:calc(100dvh - 155px)}
+ #toolbar{height:75px}
+ #topbar{height:30px}
+ #message{height:25px}
+}
+</style>
+</head>
+<body style="-webkit-tap-highlight-color:transparent">
+
+<header>
+<strong>🌍 جنگ جهانی ۱۹۳۹</strong>
+<div id="turn">سپتامبر ۱۹۳۹</div>
+</header>
+
+<div id="topbar">
+ <span>🏳️ <b id="mycountry">انتخاب کشور</b></span>
+ <span>🪖 نیروها: <b id="myunits">۰</b></span>
+ <span>🗺️ قلمرو: <b id="mylands">۰</b></span>
+</div>
+
+<div id="map"></div>
+
+<div id="selection">برای انتخاب کشور یا نیرو روی نقشه بزن.</div>
+<div id="help"><button onclick="showHelp()">❔</button></div>
+
+<div id="message">ابتدا کشور خود را انتخاب کن.</div>
+
+<div id="toolbar">
+ <button class="action" onclick="buildUnit()">
+  <span>🪖</span>ساخت نیرو
+ </button>
+ <button class="action" id="moveBtn" onclick="setMode('move')">
+  <span>➡️</span>حرکت نیرو
+ </button>
+ <button class="action" id="attackBtn" onclick="setMode('attack')">
+  <span>⚔️</span>حمله
+ </button>
+ <button class="action" onclick="endTurn()">
+  <span>⏭️</span>پایان نوبت
+ </button>
+</div>
+
+<div id="modal">
+ <div class="dialog">
+  <h2>🌍 انتخاب کشور</h2>
+  <p>کشور خودت را انتخاب کن و بازی را شروع کن. نقشه برای بارگذاری به اینترنت نیاز دارد.</p>
+  <div id="countrylist"></div>
+  <button class="primary" onclick="startGame()">شروع بازی</button>
+ </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+const $=id=>document.getElementById(id);
+
+const PLAYABLE=[
+ ["DEU","آلمان","🇩🇪","#d34e4e"],
+ ["FRA","فرانسه","🇫🇷","#4889c4"],
+ ["GBR","بریتانیا","🇬🇧","#4889c4"],
+ ["POL","لهستان","🇵🇱","#4889c4"],
+ ["RUS","شوروی","🇷🇺","#78965e"],
+ ["ITA","ایتالیا","🇮🇹","#78965e"],
+ ["USA","آمریکا","🇺🇸","#78965e"],
+ ["JPN","ژاپن","🇯🇵","#d34e4e"],
+ ["CHN","چین","🇨🇳","#4889c4"],
+ ["CAN","کانادا","🇨🇦","#4889c4"],
+ ["BRA","برزیل","🇧🇷","#78965e"],
+ ["AUS","استرالیا","🇦🇺","#4889c4"],
+ ["IND","هند","🇮🇳","#78965e"],
+ ["TUR","ترکیه","🇹🇷","#78965e"],
+ ["IRN","ایران","🇮🇷","#78965e"],
+ ["ESP","اسپانیا","🇪🇸","#78965e"],
+ ["MEX","مکزیک","🇲🇽","#78965e"],
+ ["EGY","مصر","🇪🇬","#78965e"],
+ ["NOR","نروژ","🇳🇴","#78965e"],
+ ["YUG","یوگسلاوی","🇾🇺","#78965e"]
+];
+
+const NAME={
+"Germany":"آلمان","France":"فرانسه",
+"United Kingdom":"بریتانیا","United States of America":"آمریکا",
+"United States":"آمریکا","Russia":"روسیه",
+"Russian Federation":"روسیه","Japan":"ژاپن",
+"China":"چین","Iran":"ایران","Turkey":"ترکیه",
+"Türkiye":"ترکیه","India":"هند","Brazil":"برزیل",
+"Australia":"استرالیا","Canada":"کانادا",
+"Mexico":"مکزیک","Spain":"اسپانیا","Italy":"ایتالیا",
+"Poland":"لهستان","Egypt":"مصر","Norway":"نروژ",
+"Ukraine":"اوکراین","Netherlands":"هلند",
+"Belgium":"بلژیک","Sweden":"سوئد","Switzerland":"سوئیس",
+"Finland":"فنلاند","Denmark":"دانمارک",
+"Portugal":"پرتغال","Argentina":"آرژانتین",
+"South Africa":"آفریقای جنوبی","Saudi Arabia":"عربستان",
+"Afghanistan":"افغانستان","Iraq":"عراق",
+"Pakistan":"پاکستان","South Korea":"کره جنوبی",
+"North Korea":"کره شمالی","Indonesia":"اندونزی",
+"Thailand":"تایلند","New Zealand":"نیوزیلند",
+"Greece":"یونان","Romania":"رومانی",
+"Bulgaria":"بلغارستان","Ireland":"ایرلند",
+"Austria":"اتریش","Czechia":"چک",
+"Slovakia":"اسلواکی","Serbia":"صربستان",
+"Croatia":"کرواسی","Yugoslavia":"یوگسلاوی"
+};
+
+let map=null;
+let geoLayer=null;
+let units=[];
+let countries={};
+let selectedCountry=null;
+let selectedUnit=null;
+let player=null;
+let mode="select";
+let turn=1;
+let year=1939,month=9;
+let started=false;
+let nextUnit=1;
+let unitMarkers={};
+let countryLayers={};
+let countryFeatures={};
+let countryCenters={};
+let saveTimer=null;
+
+function countryData(){
+ PLAYABLE.forEach(c=>{
+  countries[c[0]]={
+   id:c[0],name:c[1],flag:c[2],color:c[3],
+   owner:c[0],strength:1
+  };
+ });
+}
+
+function message(s){$("message").textContent=s}
+
+function iso(p){
+ return p["ISO3166-1-Alpha-3"]||
+ p.ISO_A3_EH||p.ISO_A3||p.ADM0_A3||"";
+}
+
+function countryName(p){
+ const n=p.ADMIN||p.name||p.NAME||"کشور";
+ return NAME[n]||n;
+}
+
+function getColor(code){
+ const c=countries[code];
+ if(!c)return "#708b82";
+ if(c.owner===player)return "#e0b34e";
+ const owner=countries[c.owner];
+ return owner?owner.color:"#708b82";
+}
+
+function styleFeature(feature){
+ const id=iso(feature.properties||{});
+ return {
+  color:id===selectedCountry?"#fff1ae":"#273d4a",
+  weight:id===selectedCountry?2.5:0.8,
+  fillColor:getColor(id),
+  fillOpacity:.78
+ };
+}
+
+function initialize(){
+ if(!window.L){
+  message("نقشه بارگذاری نشد. اینترنت را بررسی کن و صفحه را تازه‌سازی کن.");
+  return;
+ }
+ map=L.map("map",{zoomControl:true,minZoom:2,maxZoom:8})
+ .setView([25,15],2);
+
+ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+  maxZoom:8,
+  attribution:"© OpenStreetMap"
+ }).addTo(map);
+
+ message("در حال بارگذاری نقشه جهان...");
+
+ fetch("https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson")
+ .then(r=>{
+  if(!r.ok)throw Error("Map");
+  return r.json();
+ })
+ .then(data=>{
+  if(!data.features)throw Error("Data");
+
+  data.features.forEach(f=>{
+   const id=iso(f.properties||{});
+   if(id){
+    countryFeatures[id]=f;
+    const layer=L.geoJSON(f);
+    const center=layer.getBounds().getCenter();
+    countryCenters[id]=center;
+   }
+  });
+
+  geoLayer=L.geoJSON(data,{
+   style:styleFeature,
+   onEachFeature:(f,layer)=>{
+    const id=iso(f.properties||{});
+    const name=countryName(f.properties||{});
+    if(id)countryLayers[id]=layer;
+
+    layer.bindTooltip(name,{sticky:true});
+    layer.on("click",()=>countryClick(id,name));
+   }
+  }).addTo(map);
+
+  render();
+  message("نقشه آماده است. کشور خودت را انتخاب کن.");
+  setTimeout(()=>map.invalidateSize(),250);
+ })
+ .catch(()=>{
+  message("دریافت نقشه ناموفق بود؛ اتصال اینترنت را بررسی کن.");
+ });
+}
+
+function makeChooser(){
+ const box=$("countrylist");
+ box.innerHTML="";
+ PLAYABLE.forEach(c=>{
+  const b=document.createElement("button");
+  b.className="countrychoice";
+  b.textContent=c[2]+" "+c[1];
+  b.onclick=()=>{
+   player=c[0];
+   document.querySelectorAll(".countrychoice").forEach(x=>x.classList.remove("active"));
+   b.classList.add("active");
+   message("کشور انتخابی: "+c[1]);
+  };
+  box.appendChild(b);
+ });
+}
+
+function startGame(){
+ if(!player)return alert("یک کشور انتخاب کن.");
+ started=true;
+ $("modal").classList.add("hidden");
+ selectedCountry=player;
+ addUnit(player,2);
+ render();
+ message("بازی شروع شد. برای ساخت نیرو از دکمه پایین استفاده کن.");
+ saveGame();
+}
+
+function addUnit(code,strength){
+ const c=countries[code];
+ if(!c)return;
+ const center=countryCenters[code];
+ if(!center)return;
+ const unit={
+  id:nextUnit++,
+  country:code,
+  strength:strength||1,
+  type:"land"
+ };
+ units.push(unit);
+ selectedUnit=unit.id;
+ selectedCountry=code;
+ renderUnits();
+ updateStats();
+ saveGame();
+}
+
+function addMarker(unit){
+ const center=countryCenters[unit.country];
+ if(!center)return;
+ const owner=countries[unit.country]?.owner;
+ const color=owner===player?"#c99b3f":"#b94c4c";
+ const html='<div class="unit-marker" style="background:'+color+'">'+unit.strength+'</div>';
+ const icon=L.divIcon({
+  html:html,
+  className:"",
+  iconSize:[30,30],
+  iconAnchor:[15,15]
+ });
+ const marker=L.marker(center,{icon:icon}).addTo(map);
+ marker.on("click",e=>{
+  L.DomEvent.stopPropagation(e);
+  chooseUnit(unit.id);
+ });
+ unitMarkers[unit.id]=marker;
+}
+
+function renderUnits(){
+ Object.values(unitMarkers).forEach(m=>map.removeLayer(m));
+ unitMarkers={};
+ units.forEach(u=>addMarker(u));
+}
+
+function chooseUnit(id){
+ const u=units.find(x=>x.id===id);
+ if(!u)return;
+ if(countries[u.country].owner!==player){
+  message("این نیرو متعلق به کشور دیگری است.");
+  return;
+ }
+ selectedUnit=id;
+ selectedCountry=u.country;
+ mode="select";
+ render();
+ message("نیروی شماره "+id+" انتخاب شد. حالا حرکت یا حمله را انتخاب کن.");
+}
+
+function countryClick(id,name){
+ if(!started)return;
+ if(!id)return;
+
+ selectedCountry=id;
+
+ if(mode==="move"){
+  moveSelected(id);
+  return;
+ }
+ if(mode==="attack"){
+  attackCountry(id);
+  return;
+ }
+
+ const owner=countries[id]?.owner;
+ const c=countries[id];
+ const ownerName=countries[owner]?.name||name;
+
+ $("selection").innerHTML=
+  "<b>"+name+"</b><br>"+
+  "مالک: "+ownerName+"<br>"+
+  "نیروهای حاضر: "+units.filter(u=>u.country===id).length+
+  "<br>قلمرو: "+(c&&c.owner===player?"خودی":"غیرخودی");
+
+ render();
+}
+
+function buildUnit(){
+ if(!started)return;
+ const code=selectedCountry||player;
+ if(countries[code]?.owner!==player){
+  message("برای ساخت نیرو باید قلمرو خودت را انتخاب کنی.");
+  return;
+ }
+ addUnit(code,1);
+ message("یک نیروی جدید ساخته شد.");
+}
+
+function setMode(m){
+ if(!started)return;
+ if(!selectedUnit){
+  message("اول روی یکی از نیروهای خودت بزن و انتخابش کن.");
+  return;
+ }
+ mode=m;
+ $("moveBtn").classList.toggle("active",m==="move");
+ $("attackBtn").classList.toggle("active",m==="attack");
+ message(m==="move"?"حالت حرکت فعال شد؛ روی کشور مقصد بزن.":
+ "حالت حمله فعال شد؛ کشور دارای نیروی غیرخودی را انتخاب کن.");
+}
+
+function moveSelected(target){
+ const u=units.find(x=>x.id===selectedUnit);
+ if(!u)return;
+ if(countries[target]?.owner===player){
+  u.country=target;
+  mode="select";
+  render();
+  message("نیرو به "+countries[target].name+" منتقل شد.");
+  saveGame();
+  return;
+ }
+ if(countries[target]?.owner!==player){
+  message("برای ورود به قلمرو غیرخودی از گزینه حمله استفاده کن.");
+  return;
+ }
+}
+
+function attackCountry(target){
+ const u=units.find(x=>x.id===selectedUnit);
+ if(!u)return;
+
+ if(!countries[target]||countries[target].owner===player){
+  message("برای حمله یک قلمرو غیرخودی را انتخاب کن.");
+  return;
+ }
+
+ const defenders=units.filter(x=>x.country===target);
+ const defense=defenders.reduce((sum,x)=>sum+x.strength,0);
+
+ if(defenders.length===0){
+  message("در این کشور نیرویی برای رقابت وجود ندارد.");
+  return;
+ }
+
+ // نتیجه کاملاً انتزاعی و بازی‌وار است.
+ if(u.strength>=defense){
+  countries[target].owner=player;
+  u.country=target;
+  defenders.forEach(d=>{
+   units=units.filter(x=>x.id!==d.id);
+  });
+  mode="select";
+  message("قلمرو "+countries[target].name+" تصرف شد!");
+  logResult("تصرف قلمرو "+countries[target].name);
+ }else{
+  u.strength=Math.max(1,u.strength-1);
+  message("این رقابت به نفع مدافع تمام شد. قدرت نیروی مهاجم کاهش یافت.");
+ }
+ render();
+ saveGame();
+}
+
+function endTurn(){
+ if(!started)return;
+ turn++;
+ month++;
+ if(month>12){month=1;year++}
+ if(year>1945){year=1939;month=9}
+
+ // کشورهایی که در بازی کنترل نمی‌شوند، نیروهای خود را حفظ می‌کنند.
+ // این بازی نسخه ساده و نوبتی است.
+ mode="select";
+ selectedUnit=null;
+ $("turn").textContent=monthName(month)+" "+year;
+ render();
+ message("نوبت "+turn+" آغاز شد.");
+ saveGame();
+}
+
+function monthName(m){
+ return ["","ژانویه","فوریه","مارس","آوریل","مه","ژوئن",
+ "ژوئیه","اوت","سپتامبر","اکتبر","نوامبر","دسامبر"][m];
+}
+
+function updateStats(){
+ const ownUnits=units.filter(u=>countries[u.country]?.owner===player).length;
+ const lands=Object.values(countries).filter(c=>c.owner===player).length;
+ $("mycountry").textContent=countries[player]?.name||"";
+ $("myunits").textContent=ownUnits;
+ $("mylands").textContent=lands;
+}
+
+function render(){
+ if(geoLayer)geoLayer.setStyle(styleFeature);
+ renderUnits();
+ updateStats();
+
+ if(selectedCountry){
+  const c=countries[selectedCountry];
+  if(c){
+   const owner=countries[c.owner];
+   $("selection").innerHTML=
+   "<b>"+c.name+"</b><br>مالک: "+
+   (owner?owner.name:"ناشناخته")+
+   "<br>نیروها: "+units.filter(u=>u.country===selectedCountry).length;
+  }
+ }
+}
+
+function logResult(text){
+ // نتیجه در پیام پایین صفحه نمایش داده می‌شود.
+ message(text);
+}
+
+function saveGame(){
+ if(!started)return;
+ try{
+  const data={
+   player,units,countries,turn,year,month,nextUnit
+  };
+  localStorage.setItem("ww1939_map_save",JSON.stringify(data));
+ }catch(e){}
+}
+
+function loadGame(){
+ try{
+  const d=JSON.parse(localStorage.getItem("ww1939_map_save"));
+  if(!d||!d.player||!Array.isArray(d.units))return false;
+  player=d.player;
+  units=d.units;
+  countries=d.countries;
+  turn=d.turn||1;
+  year=d.year||1939;
+  month=d.month||9;
+  nextUnit=d.nextUnit||1;
+  started=true;
+  $("modal").classList.add("hidden");
+  $("turn").textContent=monthName(month)+" "+year;
+  return true;
+ }catch(e){return false}
+}
+
+function showHelp(){
+ alert(
+ "راهنمای بازی\n\n"+
+ "ساخت نیرو: در قلمرو خودت نیرو بساز.\n"+
+ "انتخاب نیرو: روی نشان دایره‌ای نیرو بزن.\n"+
+ "حرکت: نیرو را انتخاب کن، دکمه حرکت را بزن، سپس مقصد را انتخاب کن.\n"+
+ "حمله: نیروی خودت را انتخاب کن، دکمه حمله را بزن و قلمرو دارای نیروی رقیب را انتخاب کن.\n"+
+ "پایان نوبت: زمان بازی یک ماه جلو می‌رود.\n\n"+
+ "عدد روی نشان نیرو قدرت بازی آن را نمایش می‌دهد."
+ );
+}
+
+countryData();
+makeChooser();
+initialize();
+
+window.addEventListener("resize",()=>{
+ if(map)setTimeout(()=>map.invalidateSize(),100);
+});
+
+
+Object.defineProperties(window,{
+  started:{get:()=>started},
+  player:{get:()=>player},
+  selectedCountry:{get:()=>selectedCountry},
+  countries:{get:()=>countries},
+  units:{get:()=>units},
+  nextUnit:{get:()=>nextUnit,set:v=>{nextUnit=v}},
+  countryCenters:{get:()=>countryCenters}
+});
+
+</script>
+
+<style>
+#extraPanel{
+ position:fixed;bottom:145px;left:8px;z-index:2000;
+ width:155px;padding:9px;background:#17263a;
+ border:1px solid #bd9958;border-radius:10px;
+ color:white;font-family:Tahoma
+}
+#extraPanel button{
+ width:100%;padding:10px;margin:3px 0;
+ background:#344f6e;color:white;border:0;
+ border-radius:6px;font-family:Tahoma;font-size:11px
+}
+#extraPanel button:active{background:#c49a4c;color:#111}
+#extraPanel h4{color:#edc87b;margin:3px 0 8px}
+</style>
+
+<div id="extraPanel">
+<h4>⚔️ فرماندهی</h4>
+<div id="extraCount">نیرو: ۰</div>
+<button onclick="extraBuild('land')">🪖 ساخت نیروی زمینی</button>
+<button onclick="extraBuild('air')">✈️ ساخت نیروی هوایی</button>
+<button onclick="extraBuild('navy')">🚢 ساخت ناوگان</button>
+<button onclick="extraSelectAll()">👥 انتخاب همه</button>
+<button onclick="extraMoveMode()">➡️ حرکت گروهی</button>
+<button onclick="extraClear()">✖ لغو انتخاب</button>
+</div>
+
+<script>
+(function(){
+
+let chosen=[];
+let moving=false;
+
+function msg(s){
+ if(typeof message==="function")message(s);
+ else alert(s);
+}
+
+window.extraBuild=function(type){
+ if(!window.started || !window.player)
+  return msg("ابتدا بازی را شروع کن.");
+
+ let code=window.selectedCountry || window.player;
+ let c=window.countries && window.countries[code];
+
+ if(!c || c.owner!==window.player)
+  return msg("قلمرو خودت را انتخاب کن.");
+
+ if(!window.countryCenters || !window.countryCenters[code])
+  return msg("اطلاعات نقشه هنوز آماده نیست.");
+
+ let strength={land:1,air:2,navy:3}[type];
+
+ let unit={
+  id:window.nextUnit++,
+  country:code,
+  strength:strength,
+  type:type
+ };
+
+ window.units.push(unit);
+ chosen=[unit.id];
+
+ window.render();
+ window.saveGame();
+ refresh();
+
+ msg("نیروی جدید ساخته شد.");
+};
+
+window.extraSelectAll=function(){
+ if(!window.units)return;
+
+ chosen=window.units
+  .filter(u=>window.countries[u.country]?.owner===window.player)
+  .map(u=>u.id);
+
+ refresh();
+ msg(chosen.length+" نیرو انتخاب شد.");
+};
+
+window.extraClear=function(){
+ chosen=[];
+ moving=false;
+ refresh();
+ msg("انتخاب لغو شد.");
+};
+
+window.extraMoveMode=function(){
+ if(!chosen.length)return msg("اول نیرو انتخاب کن.");
+ moving=true;
+ msg("حالا کشور مقصد را انتخاب کن.");
+};
+
+function refresh(){
+ let el=document.getElementById("extraCount");
+ if(el)el.textContent="نیروهای انتخابی: "+chosen.length;
+}
+
+
+window.extraHandleCountryClick=function(id,name){
+  if(!moving)return false;
+  const target=countries[id];
+  if(!target || target.owner!==player){
+    msg("مقصد باید قلمرو خودی باشد.");
+    return true;
+  }
+  let count=0;
+  chosen.forEach(uid=>{
+    const u=units.find(x=>x.id===uid);
+    if(u && countries[u.country]?.owner===player){
+      u.country=id;
+      count++;
+    }
+  });
+  chosen=[];
+  moving=false;
+  render();
+  saveGame();
+  refresh();
+  msg(count+" نیرو جابه‌جا شدند.");
+  return true;
+};
+refresh();
+
+</script>
+</body>
+</html>
